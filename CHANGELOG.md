@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 — 2026-07-25
+
+- ffmpeg is now **optional**: the skill uploads the raw `.webm` and Vidmatic
+  transcodes it to MP4 server-side. Developers no longer need ffmpeg to publish.
+  (ffmpeg, if present, is used only for a nicer local MP4 deliverable.)
+
+
 ## 0.1.0 — 2026-07-24
 
 Initial public beta of the `/vidmatic:record` Claude Code skill.

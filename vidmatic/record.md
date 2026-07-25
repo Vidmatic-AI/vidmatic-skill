@@ -13,7 +13,7 @@ If no vidmatic API key is configured, this degrades cleanly to a local silent MP
 Read `CICD.md` in the project root. From **Local Development**, extract (do NOT hardcode): the rebuild command, the frontend URL, the API URL, and their health endpoints. If `CICD.md` has no such section, stop and ask the user to populate it.
 
 1. **Assert the root `.env` exists BEFORE rebuilding.** The web image bakes `NEXT_PUBLIC_*` at build time from the root `.env`. If it is missing, the rebuild silently bakes an empty Google client id: `/status` still returns 200, so the stack looks healthy, and sign-in is broken — which you only discover when the demo records a broken auth screen. If it is missing, stop and say so.
-2. `command -v ffmpeg || echo MISSING` — required. If missing, stop (`brew install ffmpeg`).
+2. `command -v ffmpeg || echo MISSING` — **optional.** Vidmatic transcodes your recording server-side, so a publish never needs local ffmpeg. If ffmpeg IS present it is used for a nicer local MP4 deliverable and a pre-flight size check; if absent, the raw `.webm` is uploaded and the server does the MP4 work. Do not stop when it is missing.
 3. Run the rebuild command exactly as written. Wait for BOTH health endpoints to return 200. Fix any build error before recording — never record a stale or broken stack.
 4. Ensure the Playwright harness is ready. Three separate things, each of which has failed on a fresh checkout:
    - **Files:** `web/playwright.config.ts` and `web/e2e/demo/` are committed (config, `_overlay.ts`, `auth.ts`, `timings.ts`).
@@ -117,14 +117,17 @@ Up to 3 attempts, fixing the spec in main context between them.
 
 ---
 
-## Step 5: Post-process to MP4 (Sonnet subagent)
+## Step 5: Prepare the upload artifact
 
-Dispatch ONE `general-purpose` subagent, `model: "sonnet"`, foreground:
-0. **`ffprobe` the recorded `.webm` FIRST and assert it matches the storyboard viewport** (1280×800). If it is smaller, stop and report it — do not transcode. An undersized capture means `video.size` is missing or disagrees with `viewport` in `playwright.config.ts`; upscaling it in ffmpeg would hide the defect behind a blurry MP4 of the right dimensions.
-1. Concat (if multiple) and transcode to MP4: `libx264 -crf 20 -preset medium -pix_fmt yuv420p -r 30 -movflags +faststart`, scaled to the viewport.
-2. Produce a poster PNG and optionally a short GIF of one highlight scene.
-3. Write to `demos/<project>_demo_<stamp>.mp4` (+ `_poster.png`).
-4. Report exact paths, duration, resolution, sizes.
+**The artifact you upload is the raw `.webm`.** Vidmatic transcodes it to MP4 (H.264, faststart, viewport-sized), validates the dimensions, and renders the narration — all server-side. There is no required local ffmpeg step.
+
+Concat first only if the run produced multiple `.webm` segments (a rare multi-context recording); a single-context run yields one `.webm` and needs nothing.
+
+**If ffmpeg IS present** (from Step 0), a Sonnet subagent may ALSO, purely for a nicer local deliverable:
+- `ffprobe` the `.webm` and assert it matches the storyboard viewport (1280×800). If it is smaller, report it — an undersized capture means `video.size` is missing or disagrees with `viewport` in `playwright.config.ts`. (Server-side validation is the backstop when ffmpeg is absent.)
+- Transcode a local MP4 (`libx264 -crf 20 -preset medium -pix_fmt yuv420p -r 30 -movflags +faststart`) + a poster PNG to `demos/<project>_demo_<stamp>.mp4` for Step 7 delivery.
+
+**If ffmpeg is absent**, skip all of the above — the `.webm` is both the upload and the local deliverable.
 
 **Do the upload (Step 6) BEFORE deleting the intermediate `.webm`/`.video` directory.** Cleaning up first means a failed upload has nothing left to retry from.
 
@@ -148,7 +151,7 @@ The only remedy available now is `suggested_words_delta` — **cut words**. Do n
 
 **If the MCP server + `VIDMATIC_API_KEY` are available:**
 
-1. `create_demo(file_path, script, title, publish: true)` → **202** with `entity_id`, `status_url`, `public_url`.
+1. `create_demo(file_path, script, title, publish: true)` → **202** with `entity_id`, `status_url`, `public_url`. `file_path` is the raw **`.webm`** (or the local MP4 if ffmpeg produced one — the server accepts either and transcodes webm as needed).
 2. Poll `get_demo_status(entity_id)` until `ai_twin_status` is `ready` or `error` (every ~10s, give up after ~10 min and print the status URL).
 3. On `ready`, print the public URL. **Do not call `set_default_video`** — a demo created with `publish: true` is promoted and made public automatically when its render succeeds, and never before (it is never publicly reachable as a silent video).
 4. On `error`, print the message and the recording URL. The video is uploaded and safe; the script can be fixed in the app's narration editor or re-submitted.
@@ -157,9 +160,9 @@ The only remedy available now is `suggested_words_delta` — **cut words**. Do n
 
 Persist the last `entity_id` per storyboard slug under `demos/`. On a re-run, print: *"Previous demo: <url> — that link keeps playing the old video."*
 
-**Publishing must never fail the recording.** Any error here still ends with the local MP4 delivered.
+**Publishing must never fail the recording.** Any error here still ends with the local artifact (MP4 if ffmpeg produced one, else the `.webm`) delivered.
 
-**If there is no key or no MCP:** deliver the local MP4 exactly as before, and print where to get one:
+**If there is no key or no MCP:** deliver the local artifact (MP4 or `.webm`) and print where to get one:
 
 > To publish narrated demos, create an API key at `<frontend>/settings/developer`, then connect the vidmatic MCP server — full setup at https://www.vidmatic.ai/use-cases/generate-demo-video.
 
@@ -167,7 +170,7 @@ Persist the last `entity_id` per storyboard slug under `demos/`. On a re-run, pr
 
 ## Step 7: Deliver
 
-- `SendUserFile` the MP4 (caption: what the demo shows) + its path and the storyboard path.
+- `SendUserFile` the local artifact — the MP4 if ffmpeg produced one, otherwise the `.webm` (caption: what the demo shows) + its path and the storyboard path.
 - Print the public URL when published.
 - Summary: scenes shown, runtime, resolution, output files, the **observed vs intended** timing delta, and any narration line that had to be trimmed.
 - Confirm `demos/` is gitignored — these are large binaries and must never be committed.
@@ -181,5 +184,5 @@ Persist the last `entity_id` per storyboard slug under `demos/`. On a re-run, pr
 - **Real flows, not fakes.** Drive the actual UI.
 - **Auth on localhost:** inject the stored token via `auth.ts` — real OAuth cannot complete on `localhost`, and no dev-login bypass ships in production for this.
 - **Determinism > speed.** Generous dwell and explicit waits make a watchable video; this is the opposite of a test run.
-- **Heavy work in Sonnet subagents** (record, ffmpeg); authoring stays in the main context.
+- **Heavy work in Sonnet subagents** (record, and the optional local ffmpeg); authoring stays in the main context. The publish path itself needs no local ffmpeg — the server transcodes.
 - **Non-destructive:** clean up demo content you created, never touch originals, never commit `demos/`.
