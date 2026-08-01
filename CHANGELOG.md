@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.0 — 2026-08-01
+
+**The skill is no longer distributed as a file. Connect the hosted MCP instead.**
+
+- `vidmatic/record.md` is **removed**. The workflows are served as prompts by the
+  hosted MCP at `https://api.vidmatic.ai/mcp`, so connecting the server is the
+  whole install and you always run the current version.
+- Install is one line:
+  `claude mcp add --transport http --scope user vidmatic https://api.vidmatic.ai/mcp --header "Authorization: Bearer vk_sk_..."`
+- Commands are now `/mcp__vidmatic__record` and `/mcp__vidmatic__audit_ux`
+  (the read-only narrated UX critique — new here, shipped a while back).
+- **Requirements corrected to Claude Code + Node.** Python and ffmpeg were listed
+  as prerequisites and never should have been: Vidmatic transcodes and renders
+  server-side.
+
+### If you installed 0.1.0 or 0.2.0, migrate
+
+The copy you made is stale and cannot be updated from here. It still hard-requires
+ffmpeg, stops unless the project has a `CICD.md`, expects a committed
+`@playwright/test` harness, and calls an upload API that has since changed — so it
+cannot publish. Delete it (both locations the old README suggested) and connect the
+MCP:
+
+```bash
+rm -rf .claude/commands/vidmatic ~/.claude/commands/vidmatic
+```
+
+
 ## 0.2.0 — 2026-07-25
 
 - ffmpeg is now **optional**: the skill uploads the raw `.webm` and Vidmatic
